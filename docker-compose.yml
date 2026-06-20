@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui
+    container_name: open-webui
+    ports:
+      - "${OPEN_WEBUI_PORT:-3000}:8080"
+    environment:
+      WEBUI_AUTH: "true"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres"
+      RAG_WEB_SEARCH_ENGINE: "searxng"
+      SEARXNG_QUERY_URL: "http://searxng:8080/search?q=<query>"
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "${SEARXNG_PORT:-8080}:${SEARXNG_PORT:-8080}"
+    environment:
+      SEARXNG_PORT: "${SEARXNG_PORT:-8080}"
+      SEARXNG_BIND_ADDRESS: "0.0.0.0"
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?Set SEARXNG_SECRET in your shell or .env file}
+    volumes:
+      - ./searxng:/etc/searxng
+    restart: unless-stopped
+
+  llama_cpp:
+    image: ghcr.io/ggml-org/llama.cpp:${IMAGE_TAG:-server-cuda13}
+    container_name: llama_cpp
+    runtime: nvidia
+    ports:
+      - "${LLAMA_PORT:-8000}:8000"
+    volumes:
+      - ./llama_cpp/models:/models
+      - ./llama_cpp/models.ini:/app/models.ini
+    command: >
+      --host 0.0.0.0
+      --port 8000
+      --models-preset /app/models.ini
+      --models-autoload
+      --models-max 1
+      -ngl 99
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  postgres-db:
+  open-webui:
